@@ -1,20 +1,4 @@
-//*****************************************************************************
-//
-// task1b.c - Producer-Consumer Problem WITH Semaphores
-// This implementation solves all the problems from task1a using semaphores
-//
-// SOLUTIONS IMPLEMENTED:
-// 1. Counting Semaphore (emptySlots) - tracks empty slots in buffer
-// 2. Counting Semaphore (fullSlots) - tracks filled slots in buffer
-// 3. Binary Semaphore (mutex) - provides mutual exclusion for buffer access
-//
-// HOW IT SOLVES THE PROBLEMS:
-// - No race condition: mutex protects shared variables
-// - No lost wakeup: semaphores properly signal between tasks
-// - No buffer corruption: mutex ensures exclusive access
-// - Atomic operations: semaphore operations are atomic
-//
-//*****************************************************************************
+
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -28,77 +12,86 @@
 #include "semphr.h"
 #include "uartstdio.h"
 
-//*****************************************************************************
-// Global Variables and Constants
-//*****************************************************************************
-#define BUFFER_SIZE 10
-#define NUM_BYTES_TO_PROCESS 50
 
-// Circular buffer for bytes
-static uint8_t buffer[BUFFER_SIZE];
+#define BUFFER_SIZE 10
+
+static int8_t buffer[BUFFER_SIZE];  // Use signed to show it stays at valid values (0 or 1)
 static int writeIndex = 0;
 static int readIndex = 0;
 
-// Semaphores - THE SOLUTION!
-static SemaphoreHandle_t emptySlots;  // Counting semaphore for empty slots
-static SemaphoreHandle_t fullSlots;   // Counting semaphore for full slots
-static SemaphoreHandle_t mutex;       // Binary semaphore for mutual exclusion
-static SemaphoreHandle_t uartMutex;   // Binary semaphore for UART output (for clean demo)
+static SemaphoreHandle_t emptySlots;  // Counting: tracks available slots for producer
+static SemaphoreHandle_t fullSlots;   // Counting: tracks filled slots for consumer
+static SemaphoreHandle_t mutex;       // Binary: mutual exclusion for buffer access
+static SemaphoreHandle_t uartMutex;   
 
-// Statistics (now protected by mutex)
-static int bytesProduced = 0;
-static int bytesConsumed = 0;
 
-//*****************************************************************************
-// Helper Functions
-//*****************************************************************************
-
-// Simulate producing a byte
-static uint8_t produceByte(void)
+// Print buffer state 
+static void printBufferState(void)
 {
-    static uint8_t value = 0;
-    return value++;
-}
-
-// Put byte into buffer (called within mutex protection)
-static void putByteIntoBuffer(uint8_t byte)
-{
-    buffer[writeIndex] = byte;
+    int i;
     
     if (uartMutex) xSemaphoreTake(uartMutex, portMAX_DELAY);
-    UARTprintf("  [PRODUCER] Put byte %d into buffer[%d]\r\n", byte, writeIndex);
+    
+    UARTprintf("  Buffer: [");
+    
+    for (i = 0; i < BUFFER_SIZE; i++)
+    {
+        if (i > 0) UARTprintf(" ");
+        UARTprintf("%3d", buffer[i]);
+    }
+    UARTprintf("]\n");
+    
+    UARTprintf("          ");
+    for (i = 0; i < BUFFER_SIZE; i++)
+    {
+        if (i == readIndex && i == writeIndex)
+            UARTprintf(" R/W");
+        else if (i == readIndex)
+            UARTprintf("  R ");
+        else if (i == writeIndex)
+            UARTprintf("  W ");
+        else
+            UARTprintf("    ");
+    }
+    UARTprintf("\n");
+    UARTprintf("  readIndex=%d, writeIndex=%d\r\n\r\n", 
+               readIndex, writeIndex);
+    
+    if (uartMutex) xSemaphoreGive(uartMutex);
+}
+
+// Producer: Add byte to buffer - PROTECTED VERSION
+static void putByteIntoBuffer(void)
+{
+    // Increment the buffer slot
+    buffer[writeIndex] = buffer[writeIndex] + 1;
+    
+    if (uartMutex) xSemaphoreTake(uartMutex, portMAX_DELAY);
+    UARTprintf("  [PRODUCER] Added 1 to buffer[%d] (now = %d)\r\n", 
+               writeIndex, buffer[writeIndex]);
     if (uartMutex) xSemaphoreGive(uartMutex);
     
     writeIndex = (writeIndex + 1) % BUFFER_SIZE;
     
-    // Toggle LED to show activity
-    GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, 
-                 GPIOPinRead(GPIO_PORTN_BASE, GPIO_PIN_0) ^ GPIO_PIN_0);
+    // Show buffer state
+    printBufferState();
 }
 
-// Remove byte from buffer (called within mutex protection)
-static uint8_t removeByteFromBuffer(void)
+// Consumer: Remove byte from buffer - PROTECTED VERSION
+static void removeByteFromBuffer(void)
 {
-    uint8_t byte = buffer[readIndex];
+    // Decrement the buffer slot
+    buffer[readIndex] = buffer[readIndex] - 1;
     
     if (uartMutex) xSemaphoreTake(uartMutex, portMAX_DELAY);
-    UARTprintf("  [CONSUMER] Got byte %d from buffer[%d]\r\n", byte, readIndex);
+    UARTprintf("  [CONSUMER] Subtracted 1 from buffer[%d] (now = %d)\r\n", 
+               readIndex, buffer[readIndex]);
     if (uartMutex) xSemaphoreGive(uartMutex);
     
     readIndex = (readIndex + 1) % BUFFER_SIZE;
     
-    // Toggle LED to show activity
-    GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, 
-                 GPIOPinRead(GPIO_PORTN_BASE, GPIO_PIN_1) ^ GPIO_PIN_1);
-    
-    return byte;
-}
-
-// Simulate consuming a byte
-static void consumeByte(uint8_t byte)
-{
-    // In real application, would process the byte
-    (void)byte; // Suppress unused variable warning
+    // Show buffer state
+    printBufferState();
 }
 
 //*****************************************************************************
@@ -106,139 +99,78 @@ static void consumeByte(uint8_t byte)
 //*****************************************************************************
 static void ProducerTask_Semaphore(void *pvParameters)
 {
-    uint8_t byte;
-    
     while(1)
     {
-        // Produce a byte
-        byte = produceByte();
-        
-        // SOLUTION: Wait for an empty slot
-        // This blocks if buffer is full, automatically handles the waiting
-        if (uartMutex) xSemaphoreTake(uartMutex, portMAX_DELAY);
-        UARTprintf("[PRODUCER] Waiting for empty slot...\r\n");
-        if (uartMutex) xSemaphoreGive(uartMutex);
-        
+        // SOLUTION 1: Wait for an empty slot (counting semaphore)
+        // This prevents buffer overflow - blocks if buffer is full
         xSemaphoreTake(emptySlots, portMAX_DELAY);
         
-        if (uartMutex) xSemaphoreTake(uartMutex, portMAX_DELAY);
-        UARTprintf("[PRODUCER] Got empty slot! Producing byte...\r\n");
-        if (uartMutex) xSemaphoreGive(uartMutex);
-        
-        // SOLUTION: Take mutex to get exclusive access to buffer
+        // SOLUTION 2: Take mutex for exclusive access (binary semaphore)
+        // This prevents race conditions on buffer modifications
         xSemaphoreTake(mutex, portMAX_DELAY);
         
-        // Put byte into buffer - now protected by mutex!
-        putByteIntoBuffer(byte);
-        bytesProduced++;
+        // Add byte to buffer - now protected!
+        putByteIntoBuffer();
         
-        // SOLUTION: Release mutex
+        // SOLUTION 3: Release mutex
         xSemaphoreGive(mutex);
         
-        // SOLUTION: Signal that there is one more full slot
-        // This will wake up consumer if it's waiting
+        // SOLUTION 4: Signal one more full slot (counting semaphore)
+        // This wakes up consumer if waiting
         xSemaphoreGive(fullSlots);
-        
-        if (uartMutex) xSemaphoreTake(uartMutex, portMAX_DELAY);
-        UARTprintf("[PRODUCER] Signaled full slot (produced=%d)\r\n", bytesProduced);
-        if (uartMutex) xSemaphoreGive(uartMutex);
         
         // Small delay to simulate production time
         vTaskDelay(pdMS_TO_TICKS(50));
-        
-        // Reset counter for demonstration
-        if (bytesProduced >= NUM_BYTES_TO_PROCESS)
-        {
-            if (uartMutex) xSemaphoreTake(uartMutex, portMAX_DELAY);
-            UARTprintf("\r\n[PRODUCER] Produced %d bytes. Pausing...\r\n\r\n", bytesProduced);
-            if (uartMutex) xSemaphoreGive(uartMutex);
-            
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            
-            xSemaphoreTake(mutex, portMAX_DELAY);
-            bytesProduced = 0;
-            xSemaphoreGive(mutex);
-        }
     }
 }
 
-//*****************************************************************************
-// Consumer Task - Now with proper synchronization!
-//*****************************************************************************
 static void ConsumerTask_Semaphore(void *pvParameters)
 {
-    uint8_t byte;
-    
     while(1)
     {
-        // SOLUTION: Wait for a full slot
-        // This blocks if buffer is empty, automatically handles the waiting
-        if (uartMutex) xSemaphoreTake(uartMutex, portMAX_DELAY);
-        UARTprintf("[CONSUMER] Waiting for full slot...\r\n");
-        if (uartMutex) xSemaphoreGive(uartMutex);
-        
+        // Wait for a full slot (counting semaphore). This prevents buffer underflow - blocks if buffer is empty
         xSemaphoreTake(fullSlots, portMAX_DELAY);
         
-        if (uartMutex) xSemaphoreTake(uartMutex, portMAX_DELAY);
-        UARTprintf("[CONSUMER] Got full slot! Consuming byte...\r\n");
-        if (uartMutex) xSemaphoreGive(uartMutex);
-        
-        // SOLUTION: Take mutex to get exclusive access to buffer
+        // Take mutex for exclusive access (binary semaphore). This prevents race conditions on buffer modifications
         xSemaphoreTake(mutex, portMAX_DELAY);
         
-        // Remove byte from buffer - now protected by mutex!
-        byte = removeByteFromBuffer();
-        bytesConsumed++;
+        // Remove byte from buffer - now protected!
+        removeByteFromBuffer();
         
-        // SOLUTION: Release mutex
+        // Release mutex
         xSemaphoreGive(mutex);
         
-        // SOLUTION: Signal that there is one more empty slot
-        // This will wake up producer if it's waiting
+        // Signal one more empty slot (counting semaphore) to wake up producer if waiting
         xSemaphoreGive(emptySlots);
-        
-        if (uartMutex) xSemaphoreTake(uartMutex, portMAX_DELAY);
-        UARTprintf("[CONSUMER] Signaled empty slot (consumed=%d)\r\n", bytesConsumed);
-        if (uartMutex) xSemaphoreGive(uartMutex);
-        
-        // Consume the byte
-        consumeByte(byte);
         
         // Small delay to simulate consumption time
         vTaskDelay(pdMS_TO_TICKS(80));
     }
 }
 
-//*****************************************************************************
-// Hardware Initialization for Task 1b
-//*****************************************************************************
+
 void Task1b_HardwareInit(void)
 {
-    // Enable UART0 peripheral
     SysCtlPeripheralEnable(SYSCTL_PERIPH_UART0);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
     
     while(!SysCtlPeripheralReady(SYSCTL_PERIPH_UART0));
     while(!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOA));
     
-    // Configure GPIO Pins for UART mode
     GPIOPinConfigure(GPIO_PA0_U0RX);
     GPIOPinConfigure(GPIO_PA1_U0TX);
     GPIOPinTypeUART(GPIO_PORTA_BASE, GPIO_PIN_0 | GPIO_PIN_1);
     
-    // Initialize UART for console I/O
     UARTStdioConfig(0, 115200, 120000000);
 }
 
-//*****************************************************************************
-// Task Initialization
-//*****************************************************************************
+
 void Task1b_Init(void)
 {
     // Initialize UART
     Task1b_HardwareInit();
     
-    // Create UART mutex for clean output (for demonstration purposes)
+    // UART mutex 
     uartMutex = xSemaphoreCreateBinary();
     xSemaphoreGive(uartMutex);
     
@@ -247,13 +179,9 @@ void Task1b_Init(void)
     UARTprintf("========================================\r\n");
     UARTprintf("Task 1b: Producer-Consumer WITH Semaphores\r\n");
     UARTprintf("========================================\r\n");
-    UARTprintf("USING:\r\n");
-    UARTprintf("- Counting semaphore (emptySlots)\r\n");
-    UARTprintf("- Counting semaphore (fullSlots)\r\n");
-    UARTprintf("- Binary semaphore (mutex)\r\n");
-    UARTprintf("========================================\r\n\r\n");
+
     
-    // Create counting semaphore for empty slots
+    // Create counting semaphore for empty slots.
     // Initial value = BUFFER_SIZE (all slots are empty initially)
     // Max value = BUFFER_SIZE
     emptySlots = xSemaphoreCreateCounting(BUFFER_SIZE, BUFFER_SIZE);
@@ -263,62 +191,29 @@ void Task1b_Init(void)
     // Max value = BUFFER_SIZE
     fullSlots = xSemaphoreCreateCounting(BUFFER_SIZE, 0);
     
-    // Create binary semaphore for mutual exclusion
-    // Acts as a mutex to protect critical sections
+    // Create binary semaphore that acts as a mutex to protect critical sections
     mutex = xSemaphoreCreateBinary();
     xSemaphoreGive(mutex); // Initialize as available
     
     UARTprintf("Semaphores created successfully!\r\n");
+    UARTprintf("- emptySlots: %d\r\n", BUFFER_SIZE);
+    UARTprintf("- fullSlots: 0\r\n");
+    UARTprintf("- mutex: available\r\n");
     UARTprintf("Starting tasks...\r\n\r\n");
     
     // Create producer task
-    xTaskCreate(ProducerTask_Semaphore, // Task function
-                "Producer_Sem",          // Task name
-                256,                     // Stack size
-                NULL,                    // Parameters
-                2,                       // Priority
-                NULL);                   // Task handle
+    xTaskCreate(ProducerTask_Semaphore, 
+                "Producer_Sem",          
+                256,                     
+                NULL,                    
+                2,                       
+                NULL);                   
     
     // Create consumer task
-    xTaskCreate(ConsumerTask_Semaphore, // Task function
-                "Consumer_Sem",          // Task name
-                256,                     // Stack size
-                NULL,                    // Parameters
-                2,                       // Priority
-                NULL);                   // Task handle
+    xTaskCreate(ConsumerTask_Semaphore, 
+                "Consumer_Sem",          
+                256,                     
+                NULL,                    
+                2,                       
+                NULL);                   
 }
-
-//*****************************************************************************
-// SOLUTIONS EXPLANATION:
-//
-// 1. COUNTING SEMAPHORE (emptySlots):
-//    - Initialized to BUFFER_SIZE (all slots empty)
-//    - Producer takes (decrements) before adding item
-//    - Consumer gives (increments) after removing item
-//    - Automatically blocks producer when buffer is full
-//
-// 2. COUNTING SEMAPHORE (fullSlots):
-//    - Initialized to 0 (no slots full)
-//    - Producer gives (increments) after adding item
-//    - Consumer takes (decrements) before removing item
-//    - Automatically blocks consumer when buffer is empty
-//
-// 3. BINARY SEMAPHORE (mutex):
-//    - Provides mutual exclusion for buffer access
-//    - Only one task can access buffer at a time
-//    - Prevents race conditions on shared variables
-//
-// WHY THIS WORKS:
-// - Semaphore operations are atomic (no interruption)
-// - No lost wakeup: semaphores maintain count
-// - No race conditions: mutex protects critical sections
-// - Proper synchronization: counting semaphores handle full/empty states
-//
-// COMPARISON TO task1a:
-// - task1a: Uses manual sleep/wakeup → lost wakeup problem
-// - task1b: Uses semaphores → no lost wakeup
-// - task1a: No protection on byteCount → race condition
-// - task1b: Semaphores track count → no race condition
-// - task1a: No mutual exclusion → buffer corruption
-// - task1b: Mutex ensures exclusive access → no corruption
-//*****************************************************************************

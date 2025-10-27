@@ -1,19 +1,4 @@
-//*****************************************************************************
-//
-// task2.c - UART Echo Program with Character Count Display
-//
-// This program:
-// 1. Receives characters from UART
-// 2. Displays only the last 15 characters in a rolling window
-// 3. When Left or Right button is pressed, displays total character count
-// 4. Character count stays visible for 10 seconds, then disappears
-//
-// Requirements:
-// - Output shows 15 characters at a time
-// - Button press displays total character count for 10 seconds
-// - Count updates automatically during the 10 second display period
-//
-//*****************************************************************************
+
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -31,16 +16,11 @@
 #include "semphr.h"
 #include "uartstdio.h"
 
-//*****************************************************************************
-// Constants
-//*****************************************************************************
+
 #define DISPLAY_WINDOW_SIZE 15
 #define COUNT_DISPLAY_TIME 10000  // 10 seconds in milliseconds
 
-//*****************************************************************************
-// Global Variables
-//*****************************************************************************
-// Circular buffer to store last 15 characters
+
 static char displayBuffer[DISPLAY_WINDOW_SIZE];
 static int bufferIndex = 0;
 static int totalCharCount = 0;
@@ -49,17 +29,14 @@ static int totalCharCount = 0;
 static volatile bool showCount = false;
 static SemaphoreHandle_t displayMutex;
 
-//*****************************************************************************
-// UART Receive Task
-// Continuously reads from UART and updates the display buffer
-//*****************************************************************************
+
 void UARTReceiveTask(void *pvParameters)
 {
     char ch;
     
     while(1)
     {
-        // Check if character is available (non-blocking check)
+        // Check if character is available 
         if (UARTCharsAvail(UART0_BASE))
         {
             // Read one character
@@ -83,10 +60,7 @@ void UARTReceiveTask(void *pvParameters)
     }
 }
 
-//*****************************************************************************
-// Display Update Task
-// Handles displaying either the 15-char window or the character count
-//*****************************************************************************
+// Display charachters and count
 void DisplayUpdateTask(void *pvParameters)
 {
     int i;
@@ -134,10 +108,8 @@ void DisplayUpdateTask(void *pvParameters)
     }
 }
 
-//*****************************************************************************
 // Button Monitor Task
-// Checks for button presses and controls display mode
-//*****************************************************************************
+
 void ButtonMonitorTask(void *pvParameters)
 {
     uint8_t buttonState;
@@ -180,9 +152,8 @@ void ButtonMonitorTask(void *pvParameters)
     }
 }
 
-//*****************************************************************************
-// Hardware Initialization for Task 2
-//*****************************************************************************
+
+
 void Task2_HardwareInit(void)
 {
     // Enable UART0 peripheral
@@ -204,19 +175,17 @@ void Task2_HardwareInit(void)
     memset(displayBuffer, '\0', DISPLAY_WINDOW_SIZE);
 }
 
-//*****************************************************************************
-// Task Initialization
-//*****************************************************************************
+
 void Task2_Init(void)
 {
     // Initialize hardware
     Task2_HardwareInit();
     
-    // Create mutex for display synchronization
+    // Create mutex 
     displayMutex = xSemaphoreCreateBinary();
     xSemaphoreGive(displayMutex);
     
-    // Create UART receive task (high priority - must be responsive)
+    // Create UART receive task (high priority)
     xTaskCreate(UARTReceiveTask,
                 "UART_RX",
                 256,
@@ -240,37 +209,10 @@ void Task2_Init(void)
                 2,  // Medium priority
                 NULL);
     
-    // Print welcome message
+
     UARTprintf("\r\n");
     UARTprintf("========================================\r\n");
     UARTprintf("UART Echo Program - Task 2\r\n");
     UARTprintf("========================================\r\n");
-    UARTprintf("Type characters to see them echoed\r\n");
-    UARTprintf("Press button to see character count\r\n");
-    UARTprintf("========================================\r\n\r\n");
-}
 
-//*****************************************************************************
-// IMPLEMENTATION NOTES:
-//
-// 1. CIRCULAR BUFFER: Stores last 15 characters efficiently
-//    - bufferIndex wraps around using modulo operation
-//    - Automatically overwrites oldest characters
-//
-// 2. DISPLAY MODES:
-//    - Normal: Shows rolling 15-character window
-//    - Count: Shows total character count (triggered by button)
-//
-// 3. BUTTON HANDLING:
-//    - Detects button press (active low)
-//    - Sets timer for 10-second display period
-//    - Automatically returns to normal mode after timeout
-//
-// 4. SYNCHRONIZATION:
-//    - Mutex protects shared variables (buffer, count)
-//    - Prevents race conditions between tasks
-//
-// 5. UART HANDLING:
-//    - Non-blocking receive to prevent task blocking
-//    - Separate task for receiving ensures responsiveness
-//*****************************************************************************
+}
