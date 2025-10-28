@@ -14,14 +14,16 @@
 #include "task1a.h"  
 #include "task1b.h"  
 #include "task2.h"
-#include "task3.h"  
+#include "task3.h"
+#include "task3c.h"
 
 
 
 //#define RUN_TASK1A   
 //#define RUN_TASK1B
 //#define RUN_TASK2
-#define RUN_TASK3
+//#define RUN_TASK3
+#define RUN_TASK3C
 
 void HardwareInit(void)
 {
@@ -78,8 +80,11 @@ int main(void)
     #elif defined(RUN_TASK3)
 
         Task3_Init();
-        
-        
+
+#elif defined(RUN_TASK3C)
+
+    Task3c_Init();
+
     #else
         #error "No task selected! Please define RUN_TASK1A, RUN_TASK1B, RUN_TASK2, or RUN_TASK3"
     #endif
