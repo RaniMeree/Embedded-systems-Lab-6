@@ -14,6 +14,8 @@
 
 #define BUFFER_SIZE 10 //Buffer size
 
+
+
 static int8_t buffer[BUFFER_SIZE];  // Use signed to show negative values as bugs!
 static int writeIndex = 0;
 static int readIndex = 0;
@@ -53,16 +55,19 @@ static void printBufferState(void)
                readIndex, writeIndex);
 }
 
+
 // Producer: Add byte to buffer 
 static void putByteIntoBuffer(void)
 {
     // PROBLEM: Not atomic! Consumer might modify same slot
     buffer[writeIndex] = buffer[writeIndex] + 1;
     
-    UARTprintf("  [PRODUCER] Added 1 to buffer[%d] (now = %d)\r\n", 
+    UARTprintf("  [PRODUCER] Added 1 to buffer[%d] (now = %d)\r\n",
                writeIndex, buffer[writeIndex]);
     writeIndex = (writeIndex + 1) % BUFFER_SIZE;
-    
+
+
+
     // Show buffer state
     printBufferState();
 }
@@ -73,7 +78,7 @@ static void removeByteFromBuffer(void)
     // PROBLEM: Not atomic! Producer might modify same slot
     buffer[readIndex] = buffer[readIndex] - 1;
     
-    UARTprintf("  [CONSUMER] Subtracted 1 from buffer[%d] (now = %d)\r\n", 
+    UARTprintf("  [CONSUMER]  Subtracted 1 from buffer[%d] (now = %d)\r\n",
                readIndex, buffer[readIndex]);
     readIndex = (readIndex + 1) % BUFFER_SIZE;
     
@@ -90,7 +95,7 @@ static void ProducerTask(void *pvParameters)
         putByteIntoBuffer();
         
         // Small delay to simulate production time
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 
@@ -105,7 +110,7 @@ static void ConsumerTask(void *pvParameters)
         removeByteFromBuffer();
         
         // Small delay to simulate consumption time
-        vTaskDelay(pdMS_TO_TICKS(80));
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 

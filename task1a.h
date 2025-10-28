@@ -1,9 +1,4 @@
-//*****************************************************************************
-//
-// task1a.h - Producer-Consumer Problem WITHOUT Semaphores (Student Level)
-// This demonstrates the classic race condition problem
-//
-//*****************************************************************************
+
 
 #ifndef TASK1A_H_
 #define TASK1A_H_

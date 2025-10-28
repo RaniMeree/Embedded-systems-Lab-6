@@ -13,13 +13,15 @@
 // Include task headers
 #include "task1a.h"  
 #include "task1b.h"  
-#include "task2.h"   
+#include "task2.h"
+#include "task3.h"  
 
 
 
-#define RUN_TASK1A   
-//#define RUN_TASK1B  
-//#define RUN_TASK2    
+//#define RUN_TASK1A   
+//#define RUN_TASK1B
+//#define RUN_TASK2
+#define RUN_TASK3
 
 void HardwareInit(void)
 {
@@ -72,6 +74,10 @@ int main(void)
     #elif defined(RUN_TASK2)
 
         Task2_Init();
+
+    #elif defined(RUN_TASK3)
+
+        Task3_Init();
         
         
     #else

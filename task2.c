@@ -66,41 +66,41 @@ void DisplayUpdateTask(void *pvParameters)
     int i;
     int idx;
     int startIdx;
+
     
     while(1)
     {
         xSemaphoreTake(displayMutex, portMAX_DELAY);
+        // Clear screen and move cursor to home
+        UARTprintf("\033[2J\033[H");
         
-        if (!showCount)
+        // Always display last 15 characters
+        UARTprintf("Last 15 characters:\r\n");
+        UARTprintf("-------------------\r\n");
+
+        // Display in the order they were received
+        startIdx = bufferIndex;
+        for (i = 0; i < DISPLAY_WINDOW_SIZE; i++)
         {
-            // Normal mode: Display last 15 characters
-            UARTprintf("\033[2J\033[H"); // Clear screen and move cursor to home
-            UARTprintf("Last 15 characters:\r\n");
-            UARTprintf("-------------------\r\n");
-            
-            // Display in the order they were received
-            startIdx = bufferIndex;
-            for (i = 0; i < DISPLAY_WINDOW_SIZE; i++)
+            idx = (startIdx + i) % DISPLAY_WINDOW_SIZE;
+            if (displayBuffer[idx] != '\0')
             {
-                idx = (startIdx + i) % DISPLAY_WINDOW_SIZE;
-                if (displayBuffer[idx] != '\0')
-                {
-                    UARTprintf("%c", displayBuffer[idx]);
-                }
+                UARTprintf("%c", displayBuffer[idx]);
             }
-            UARTprintf("\r\n-------------------\r\n");
-            UARTprintf("Total Characters: %d\r\n", totalCharCount);
         }
-        else
+        
+        UARTprintf("\r\n");
+        
+        // If button pressed, show count below the buffer
+        if (showCount)
         {
-            // Count display mode: Show total character count (highlighted)
-            UARTprintf("\033[2J\033[H"); // Clear screen
+            UARTprintf("\r\n");
             UARTprintf("===========================\r\n");
             UARTprintf("  TOTAL CHARACTERS: %d\r\n", totalCharCount);
             UARTprintf("===========================\r\n");
             UARTprintf("(Displayed for 10 seconds)\r\n");
         }
-        
+
         xSemaphoreGive(displayMutex);
         
         // Update display every 200ms
