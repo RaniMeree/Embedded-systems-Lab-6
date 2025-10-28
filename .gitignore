@@ -1,1 +1,12 @@
 /Debug/
+.cproject
+.ccsproject
+/drivers
+/FreeRTOS
+.project
+fake_sensors.c
+FreeRTOSConfig.h
+tm4c129encpdt.cmd
+tm4c129encpdt_startup_ccs.c
+uartstdio.c
+uartstdio.h
