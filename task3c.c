@@ -28,16 +28,29 @@
 #define ACCEL_READINGS_PER_CYCLE    2  // 40ms / 20ms = 2
 
 
-// Structure to hold sensor reading with identifier
+// Structures for each sensor type
 typedef struct {
-    uint8_t sensorType;  // 0=mic, 1=joystick, 2=accel
-    union {float micValue; uint16_t joystickValues[2]; uint16_t accelValues[3];} data;
-} SensorReading_t;
+    float micValue;
+} MicReading_t;
 
-static QueueHandle_t sensorQueue;
+typedef struct {
+    uint16_t x;
+    uint16_t y;
+} JoystickReading_t;
+
+typedef struct {
+    uint16_t x;
+    uint16_t y;
+    uint16_t z;
+} AccelReading_t;
+
+// Three separate queues - one for each sensor
+QueueHandle_t micQueue;
+QueueHandle_t joystickQueue;
+QueueHandle_t accelQueue;
 
 
-static void ReadJoystick(uint16_t *x, uint16_t *y)
+void ReadJoystick(uint16_t *x, uint16_t *y)
 {
     uint32_t adcValues[2];
     
@@ -50,7 +63,7 @@ static void ReadJoystick(uint16_t *x, uint16_t *y)
     *y = adcValues[1];
 }
 
-static void ReadMicrophone(float *value)
+void ReadMicrophone(float *value)
 {
     uint32_t adcValue;
     
@@ -64,7 +77,7 @@ static void ReadMicrophone(float *value)
     *value = (adcValue * 3.3) / 4095.0;  // Fixed: 4095 not 4096
 }
 
-static void ReadAccelerometer(uint16_t *x, uint16_t *y, uint16_t *z)
+void ReadAccelerometer(uint16_t *x, uint16_t *y, uint16_t *z)
 {
     uint32_t adcValues[3];
     
@@ -79,187 +92,168 @@ static void ReadAccelerometer(uint16_t *x, uint16_t *y, uint16_t *z)
 }
 
 
-static void MicrophoneTask(void *pvParameters)
+void MicrophoneTask(void *pvParameters)
 {
     TickType_t xLastWakeTime;
-    SensorReading_t reading;
-    float micValue;
+    MicReading_t reading;
     
     xLastWakeTime = xTaskGetTickCount();
-    reading.sensorType = 0;
     
     while(1)
     {
         // Read microphone from ADC
-        ReadMicrophone(&micValue);
-        reading.data.micValue = micValue;
+        ReadMicrophone(&reading.micValue);
         
-        xQueueSend(sensorQueue, &reading, 0);
+        xQueueSend(micQueue, &reading, 0);
         
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(MIC_PERIOD_MS));
     }
 }
 
 
-static void JoystickTask(void *pvParameters)
+void JoystickTask(void *pvParameters)
 {
     TickType_t xLastWakeTime;
-    SensorReading_t reading;
-    uint16_t x, y;
+    JoystickReading_t reading;
     
     xLastWakeTime = xTaskGetTickCount();
-    reading.sensorType = 1;
     
     while(1)
     {
         // Read joystick from ADC
-        ReadJoystick(&x, &y);
-        reading.data.joystickValues[0] = x;
-        reading.data.joystickValues[1] = y;
+        ReadJoystick(&reading.x, &reading.y);
         
-        xQueueSend(sensorQueue, &reading, 0);
+        xQueueSend(joystickQueue, &reading, 0);
         
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(JOYSTICK_PERIOD_MS));
     }
 }
 
 
-static void AccelerometerTask(void *pvParameters)
+void AccelerometerTask(void *pvParameters)
 {
     TickType_t xLastWakeTime;
-    SensorReading_t reading;
-    uint16_t x, y, z;
+    AccelReading_t reading;
     
     xLastWakeTime = xTaskGetTickCount();
-    reading.sensorType = 2;
     
     while(1)
     {
         // Read accelerometer
-        ReadAccelerometer(&x, &y, &z);
-        reading.data.accelValues[0] = x;
-        reading.data.accelValues[1] = y;
-        reading.data.accelValues[2] = z;
+        ReadAccelerometer(&reading.x, &reading.y, &reading.z);
         
-        xQueueSend(sensorQueue, &reading, 0);
+        xQueueSend(accelQueue, &reading, 0);
         
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(ACCEL_PERIOD_MS));
     }
 }
 
 
-static void GatekeeperTask(void *pvParameters)
+void GatekeeperTask(void *pvParameters)
 {
     TickType_t xLastWakeTime;
-    SensorReading_t reading;
+    MicReading_t micReading;
+    JoystickReading_t joyReading;
+    AccelReading_t accelReading;
+    
+    float micMin = 3.3, micMax = 0.0;  // Track min/max for peak detection
+    uint32_t joyXSum = 0, joyYSum = 0;
+    uint32_t accelXSum = 0, accelYSum = 0, accelZSum = 0;
+    int micCount = 0, joyCount = 0, accelCount = 0;
     
     xLastWakeTime = xTaskGetTickCount();
     
     while(1)
     {
-        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(GATEKEEPER_PERIOD_MS));
+        // Clear screen at the beginning
+        UARTprintf("\033[2J\033[H");
         
-        // Print all readings from queue individually
-        while(xQueueReceive(sensorQueue, &reading, 0) == pdPASS)
+        // Reset counters
+        joyXSum = 0; joyYSum = 0;
+        accelXSum = 0; accelYSum = 0; accelZSum = 0;
+        micCount = 0; joyCount = 0; accelCount = 0;
+        micMin = 3.3; micMax = 0.0;
+        
+        // Collect all readings from microphone queue
+        while(xQueueReceive(micQueue, &micReading, 0) == pdPASS)
         {
-            switch(reading.sensorType)
-            {
-                case 0: // Microphone - print in dB
-                {
-                    float dcBias = 1.65;
-                    float amplitude = reading.data.micValue - dcBias;
-                    if (amplitude < 0) amplitude = -amplitude;  // Absolute value
-                    
-                    // Convert to dB (reference: 1mV = 0dB)
-                    float refVoltage = 0.001;
-                    float dB;
-                    
-                    if (amplitude > 0.0001) {
-                        dB = 20.0 * log10f(amplitude / refVoltage);
-                    } else {
-                        dB = 0.0;  // Very quiet
-                    }
-                    
-                    int dbWhole = (int)dB;
-                    int dbFrac = (int)((dB - dbWhole) * 10);
-                    if (dbFrac < 0) dbFrac = -dbFrac;
-                    
-                    //UARTprintf("Mic: %d.%01ddb\r\n", dbWhole, dbFrac);
-
-
-
-                    /*
-                    // Step 1: Remove DC bias (1.65V)
-                    float amplitude = reading.data.micValue - 1.65;
-                    if (amplitude < 0) amplitude = -amplitude;  // Make positive
-                    
-                    // Step 2: Convert to millivolts (easier to understand)
-                    int millivolts = (int)(amplitude * 1000);
-                    
-                    // Step 3: Simple dB approximation using doubling rule
-                    // Every doubling of voltage = +6dB
-                    // 1mV = 0dB, 2mV = 6dB, 4mV = 12dB, 8mV = 18dB, etc.
-                    int dB = 0;
-                    int temp = millivolts;
-                    
-                    while (temp >= 2) {  // Count how many times we can divide by 2
-                        dB += 6;
-                        temp = temp / 2;
-                    }
-                    */
-                }
-                break;
-                
-                            }
+            // Track min and max for peak-to-peak calculation
+            if (micReading.micValue < micMin) micMin = micReading.micValue;
+            if (micReading.micValue > micMax) micMax = micReading.micValue;
+            micCount++;
         }
         
+        // Collect all readings from joystick queue
+        while(xQueueReceive(joystickQueue, &joyReading, 0) == pdPASS)
+        {
+            joyXSum += joyReading.x;
+            joyYSum += joyReading.y;
+            joyCount++;
+        }
+        
+        // Collect all readings from accelerometer queue
+        while(xQueueReceive(accelQueue, &accelReading, 0) == pdPASS)
+        {
+            accelXSum += accelReading.x;
+            accelYSum += accelReading.y;
+            accelZSum += accelReading.z;
+            accelCount++;
+        }
+        
+        // Print averages
+
         UARTprintf("\r\n========== Average Sensor Data ==========\r\n");
+        
+        if (micCount > 0)
+        {
+            float peakToPeak = micMax - micMin;  // Amplitude of sound
 
-                if (micCount > 0)
-                {
-                    float peakToPeak = micMax - micMin;  // Amplitude of sound
+            // Convert amplitude to decibels
+            // Reference: use a small value to avoid log(0), typical mic reference
+            float refVoltage = 0.001;  // 1 mV reference
+            float dB;
 
-                    // Convert amplitude to decibels
-                    // Reference: use a small value to avoid log(0), typical mic reference
-                    float refVoltage = 0.001;  // 1 mV reference
-                    float dB;
+            if (peakToPeak > 0.0001) {  // Avoid log of very small numbers
+                dB = 20.0 * log10f(peakToPeak / refVoltage);
+            } else {
+                dB = 0.0;  // Silence
+            }
 
-                    if (peakToPeak > 0.0001) {  // Avoid log of very small numbers
-                        dB = 20.0 * log10f(peakToPeak / refVoltage);
-                    } else {
-                        dB = 0.0;  // Silence
-                    }
+            int dbWhole = (int)dB;
+            int dbFrac = (int)((dB - dbWhole) * 10);
+            if (dbFrac < 0) dbFrac = -dbFrac;  // Handle negative fractions
 
-                    int dbWhole = (int)dB;
-                    int dbFrac = (int)((dB - dbWhole) * 10);
-                    if (dbFrac < 0) dbFrac = -dbFrac;  // Handle negative fractions
+            UARTprintf("Mic: %d.%01d dB | samples: %d\r\n", dbWhole, dbFrac, micCount);
+        }
+        
+        if (joyCount > 0)
+        {
+            UARTprintf("Joy: X=%d, Y=%d (%d)\r\n", 
+                       joyXSum/joyCount, joyYSum/joyCount, joyCount);
+        }
+        
+        if (accelCount > 0)
+        {
+            UARTprintf("Accel: X=%d, Y=%d, Z=%d (%d)\r\n", 
+                       accelXSum/accelCount, accelYSum/accelCount, 
+                       accelZSum/accelCount, accelCount);
+        }
+        
+        UARTprintf("=================================\r\n");
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(GATEKEEPER_PERIOD_MS));
 
-                    UARTprintf("Mic: %d.%01d dB | samples: %d\r\n", dbWhole, dbFrac, micCount);
-                }
 
-                if (joyCount > 0)
-                {
-                    UARTprintf("Joy: X=%d, Y=%d (%d)\r\n",
-                               joyXSum/joyCount, joyYSum/joyCount, joyCount);
-                }
-
-                if (accelCount > 0)
-                {
-                    UARTprintf("Accel: X=%d, Y=%d, Z=%d (%d)\r\n",
-                               accelXSum/accelCount, accelYSum/accelCount,
-                               accelZSum/accelCount, accelCount);
-                }
-
-                UARTprintf("=================================\r\n");
-                vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(GATEKEEPER_PERIOD_MS));
 
     }
+    //UARTprintf("\033[2J\033[H");
+
+
+
 }
 
-//*****************************************************************************
-// Hardware Initialization for Task 3c
-//*****************************************************************************
-static void Task3c_HardwareInit(void)
+// Hardware Initialization for Task 3
+void Task3_HardwareInit(void)
+
 {
     // Enable peripherals
     SysCtlPeripheralEnable(SYSCTL_PERIPH_UART0);
@@ -308,20 +302,22 @@ static void Task3c_HardwareInit(void)
 }
 
 
-void Task3c_Init(void)
+void Task3_Init(void)
 {
-    Task3c_HardwareInit();
+    Task3_HardwareInit();
     
-    sensorQueue = xQueueCreate(QUEUE_LENGTH, sizeof(SensorReading_t));
+    // Create 3 separate queues - one for each sensor
+    micQueue = xQueueCreate(QUEUE_LENGTH, sizeof(MicReading_t));
+    joystickQueue = xQueueCreate(QUEUE_LENGTH, sizeof(JoystickReading_t));
+    accelQueue = xQueueCreate(QUEUE_LENGTH, sizeof(AccelReading_t));
     
     UARTprintf("\r\n========================================\r\n");
-    UARTprintf("Task 3c - Individual Sensor Readings\r\n");
-    UARTprintf("========================================\r\n\r\n");
+    UARTprintf("Task 3 - Sensor Reading (3 Queues)\r\n");
+    UARTprintf("========================================\r\n");
     
     xTaskCreate(MicrophoneTask, "Mic", 128, NULL, 2, NULL);
     xTaskCreate(JoystickTask, "Joy", 128, NULL, 2, NULL);
     xTaskCreate(AccelerometerTask, "Accel", 128, NULL, 2, NULL);
     xTaskCreate(GatekeeperTask, "Gate", 256, NULL, 1, NULL);
 }
-
 

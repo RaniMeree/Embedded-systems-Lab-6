@@ -28,13 +28,26 @@
 #define ACCEL_READINGS_PER_CYCLE    2  // 40ms / 20ms = 2
 
 
-// Structure to hold sensor reading with identifier
+// Structures for each sensor type
 typedef struct {
-    uint8_t sensorType;  // 0=mic, 1=joystick, 2=accel
-    union {float micValue; uint16_t joystickValues[2]; uint16_t accelValues[3];} data;
-} SensorReading_t;
+    float micValue;
+} MicReading_t;
 
-QueueHandle_t sensorQueue;  // Shared queue (removed static)
+typedef struct {
+    uint16_t x;
+    uint16_t y;
+} JoystickReading_t;
+
+typedef struct {
+    uint16_t x;
+    uint16_t y;
+    uint16_t z;
+} AccelReading_t;
+
+// Three separate queues - one for each sensor
+QueueHandle_t micQueue;
+QueueHandle_t joystickQueue;
+QueueHandle_t accelQueue;
 
 
 void ReadJoystick(uint16_t *x, uint16_t *y)
@@ -82,19 +95,16 @@ void ReadAccelerometer(uint16_t *x, uint16_t *y, uint16_t *z)
 void MicrophoneTask(void *pvParameters)
 {
     TickType_t xLastWakeTime;
-    SensorReading_t reading;
-    float micValue;
+    MicReading_t reading;
     
     xLastWakeTime = xTaskGetTickCount();
-    reading.sensorType = 0;
     
     while(1)
     {
         // Read microphone from ADC
-        ReadMicrophone(&micValue);
-        reading.data.micValue = micValue;
+        ReadMicrophone(&reading.micValue);
         
-        xQueueSend(sensorQueue, &reading, 0);
+        xQueueSend(micQueue, &reading, 0);
         
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(MIC_PERIOD_MS));
     }
@@ -104,20 +114,16 @@ void MicrophoneTask(void *pvParameters)
 void JoystickTask(void *pvParameters)
 {
     TickType_t xLastWakeTime;
-    SensorReading_t reading;
-    uint16_t x, y;
+    JoystickReading_t reading;
     
     xLastWakeTime = xTaskGetTickCount();
-    reading.sensorType = 1;
     
     while(1)
     {
         // Read joystick from ADC
-        ReadJoystick(&x, &y);
-        reading.data.joystickValues[0] = x;
-        reading.data.joystickValues[1] = y;
+        ReadJoystick(&reading.x, &reading.y);
         
-        xQueueSend(sensorQueue, &reading, 0);
+        xQueueSend(joystickQueue, &reading, 0);
         
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(JOYSTICK_PERIOD_MS));
     }
@@ -127,21 +133,16 @@ void JoystickTask(void *pvParameters)
 void AccelerometerTask(void *pvParameters)
 {
     TickType_t xLastWakeTime;
-    SensorReading_t reading;
-    uint16_t x, y, z;
+    AccelReading_t reading;
     
     xLastWakeTime = xTaskGetTickCount();
-    reading.sensorType = 2;
     
     while(1)
     {
         // Read accelerometer
-        ReadAccelerometer(&x, &y, &z);
-        reading.data.accelValues[0] = x;
-        reading.data.accelValues[1] = y;
-        reading.data.accelValues[2] = z;
+        ReadAccelerometer(&reading.x, &reading.y, &reading.z);
         
-        xQueueSend(sensorQueue, &reading, 0);
+        xQueueSend(accelQueue, &reading, 0);
         
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(ACCEL_PERIOD_MS));
     }
@@ -151,7 +152,9 @@ void AccelerometerTask(void *pvParameters)
 void GatekeeperTask(void *pvParameters)
 {
     TickType_t xLastWakeTime;
-    SensorReading_t reading;
+    MicReading_t micReading;
+    JoystickReading_t joyReading;
+    AccelReading_t accelReading;
     
     float micMin = 3.3, micMax = 0.0;  // Track min/max for peak detection
     uint32_t joyXSum = 0, joyYSum = 0;
@@ -171,31 +174,30 @@ void GatekeeperTask(void *pvParameters)
         micCount = 0; joyCount = 0; accelCount = 0;
         micMin = 3.3; micMax = 0.0;
         
-        // Collect all readings from queue
-        while(xQueueReceive(sensorQueue, &reading, 0) == pdPASS)
+        // Collect all readings from microphone queue
+        while(xQueueReceive(micQueue, &micReading, 0) == pdPASS)
         {
-            switch(reading.sensorType)
-            {
-                case 0: // Microphone
-                    // Track min and max for peak-to-peak calculation
-                    if (reading.data.micValue < micMin) micMin = reading.data.micValue;
-                    if (reading.data.micValue > micMax) micMax = reading.data.micValue;
-                    micCount++;
-                    break;
-                    
-                case 1: // Joystick
-                    joyXSum += reading.data.joystickValues[0];
-                    joyYSum += reading.data.joystickValues[1];
-                    joyCount++;
-                    break;
-                    
-                case 2: // Accelerometer
-                    accelXSum += reading.data.accelValues[0];
-                    accelYSum += reading.data.accelValues[1];
-                    accelZSum += reading.data.accelValues[2];
-                    accelCount++;
-                    break;
-            }
+            // Track min and max for peak-to-peak calculation
+            if (micReading.micValue < micMin) micMin = micReading.micValue;
+            if (micReading.micValue > micMax) micMax = micReading.micValue;
+            micCount++;
+        }
+        
+        // Collect all readings from joystick queue
+        while(xQueueReceive(joystickQueue, &joyReading, 0) == pdPASS)
+        {
+            joyXSum += joyReading.x;
+            joyYSum += joyReading.y;
+            joyCount++;
+        }
+        
+        // Collect all readings from accelerometer queue
+        while(xQueueReceive(accelQueue, &accelReading, 0) == pdPASS)
+        {
+            accelXSum += accelReading.x;
+            accelYSum += accelReading.y;
+            accelZSum += accelReading.z;
+            accelCount++;
         }
         
         // Print averages
@@ -304,10 +306,13 @@ void Task3_Init(void)
 {
     Task3_HardwareInit();
     
-    sensorQueue = xQueueCreate(QUEUE_LENGTH, sizeof(SensorReading_t));
+    // Create 3 separate queues - one for each sensor
+    micQueue = xQueueCreate(QUEUE_LENGTH, sizeof(MicReading_t));
+    joystickQueue = xQueueCreate(QUEUE_LENGTH, sizeof(JoystickReading_t));
+    accelQueue = xQueueCreate(QUEUE_LENGTH, sizeof(AccelReading_t));
     
     UARTprintf("\r\n========================================\r\n");
-    UARTprintf("Task 3 - Sensor Reading\r\n");
+    UARTprintf("Task 3 - Sensor Reading (3 Queues)\r\n");
     UARTprintf("========================================\r\n");
     
     xTaskCreate(MicrophoneTask, "Mic", 128, NULL, 2, NULL);
