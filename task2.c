@@ -33,6 +33,7 @@ static SemaphoreHandle_t displayMutex;
 void UARTReceiveTask(void *pvParameters)
 {
     char ch;
+    TickType_t lastDisplayUpdate = 0;
     
     while(1)
     {
@@ -55,57 +56,58 @@ void UARTReceiveTask(void *pvParameters)
             xSemaphoreGive(displayMutex);
         }
         
+        // Update display every 200ms
+        TickType_t currentTime = xTaskGetTickCount();
+        if ((currentTime - lastDisplayUpdate) >= pdMS_TO_TICKS(200))
+        {
+            DisplayUpdateFunction();
+            lastDisplayUpdate = currentTime;
+        }
+        
         // Small delay to prevent hogging CPU
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
-// Display charachters and count
-void DisplayUpdateTask(void *pvParameters)
+// Display charachters and count (now a function instead of a task)
+void DisplayUpdateFunction(void)
 {
     int i;
     int idx;
     int startIdx;
 
+    xSemaphoreTake(displayMutex, portMAX_DELAY);
+    // Clear screen and move cursor to home
+    UARTprintf("\033[2J\033[H");
     
-    while(1)
+    // Always display last 15 characters
+    UARTprintf("Last 15 characters:\r\n");
+    UARTprintf("-------------------\r\n");
+
+    // Display in the order they were received
+    startIdx = bufferIndex;
+    for (i = 0; i < DISPLAY_WINDOW_SIZE; i++)
     {
-        xSemaphoreTake(displayMutex, portMAX_DELAY);
-        // Clear screen and move cursor to home
-        UARTprintf("\033[2J\033[H");
-        
-        // Always display last 15 characters
-        UARTprintf("Last 15 characters:\r\n");
-        UARTprintf("-------------------\r\n");
-
-        // Display in the order they were received
-        startIdx = bufferIndex;
-        for (i = 0; i < DISPLAY_WINDOW_SIZE; i++)
+        idx = (startIdx + i) % DISPLAY_WINDOW_SIZE;
+        if (displayBuffer[idx] != '\0')
         {
-            idx = (startIdx + i) % DISPLAY_WINDOW_SIZE;
-            if (displayBuffer[idx] != '\0')
-            {
-                UARTprintf("%c", displayBuffer[idx]);
-            }
+            UARTprintf("%c", displayBuffer[idx]);
         }
-        
-        UARTprintf("\r\n");
-        
-        // If button pressed, show count below the buffer
-        if (showCount)
-        {
-            UARTprintf("\r\n");
-            UARTprintf("===========================\r\n");
-            UARTprintf("  TOTAL CHARACTERS: %d\r\n", totalCharCount);
-            UARTprintf("===========================\r\n");
-            UARTprintf("(Displayed for 10 seconds)\r\n");
-        }
-
-        xSemaphoreGive(displayMutex);
-        
-        // Update display every 200ms
-        vTaskDelay(pdMS_TO_TICKS(200));
     }
+    
+    UARTprintf("\r\n");
+    
+    // If button pressed, show count below the buffer
+    if (showCount)
+    {
+        UARTprintf("\r\n");
+        UARTprintf("===========================\r\n");
+        UARTprintf("  TOTAL CHARACTERS: %d\r\n", totalCharCount);
+        UARTprintf("===========================\r\n");
+        UARTprintf("(Displayed for 10 seconds)\r\n");
+    }
+
+    xSemaphoreGive(displayMutex);
 }
 
 // Button Monitor Task
@@ -185,20 +187,12 @@ void Task2_Init(void)
     displayMutex = xSemaphoreCreateBinary();
     xSemaphoreGive(displayMutex);
     
-    // Create UART receive task (high priority)
+    // Create UART receive task (high priority) - now also handles display updates
     xTaskCreate(UARTReceiveTask,
                 "UART_RX",
                 256,
                 NULL,
                 3,  // Higher priority
-                NULL);
-    
-    // Create display update task
-    xTaskCreate(DisplayUpdateTask,
-                "Display",
-                256,
-                NULL,
-                2,  // Medium priority
                 NULL);
     
     // Create button monitor task

@@ -153,7 +153,6 @@ void GatekeeperTask(void *pvParameters)
     TickType_t xLastWakeTime;
     SensorReading_t reading;
     
-    float micSum = 0;
     float micMin = 3.3, micMax = 0.0;  // Track min/max for peak detection
     uint32_t joyXSum = 0, joyYSum = 0;
     uint32_t accelXSum = 0, accelYSum = 0, accelZSum = 0;
@@ -163,10 +162,11 @@ void GatekeeperTask(void *pvParameters)
     
     while(1)
     {
-        //vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(GATEKEEPER_PERIOD_MS));
+        // Clear screen at the beginning
+        UARTprintf("\033[2J\033[H");
         
         // Reset counters
-        micSum = 0; joyXSum = 0; joyYSum = 0;
+        joyXSum = 0; joyYSum = 0;
         accelXSum = 0; accelYSum = 0; accelZSum = 0;
         micCount = 0; joyCount = 0; accelCount = 0;
         micMin = 3.3; micMax = 0.0;
@@ -177,39 +177,16 @@ void GatekeeperTask(void *pvParameters)
             switch(reading.sensorType)
             {
                 case 0: // Microphone
-                {
-                    float dcBias = 1.65;
-                    float amplitude = reading.data.micValue - dcBias;
-                    if (amplitude < 0) amplitude = -amplitude;  // Absolute value
-
-                    // Convert to dB (reference: 1mV = 0dB)
-                    float refVoltage = 0.001;
-                    float dB;
-                    if (amplitude > 0.0001) {
-                        dB = 20.0 * log10f(amplitude / refVoltage);
-                    } else {
-                        dB = 0.0;  // Very quiet
-                    }
-
-                    int dbWhole = (int)dB;
-                    int dbFrac = (int)((dB - dbWhole) * 10);
-                    if (dbFrac < 0) dbFrac = -dbFrac;
-
-                    UARTprintf("Mic: %d.%01ddb\r\n", dbWhole, dbFrac);
-                }
-                break;
+                    // Track min and max for peak-to-peak calculation
+                    if (reading.data.micValue < micMin) micMin = reading.data.micValue;
+                    if (reading.data.micValue > micMax) micMax = reading.data.micValue;
+                    micCount++;
+                    break;
                     
                 case 1: // Joystick
                     joyXSum += reading.data.joystickValues[0];
                     joyYSum += reading.data.joystickValues[1];
                     joyCount++;
-                    
-                    // COMMENTED OUT: Print individual joystick reading (causes timing issues)
-                    /*
-                    UARTprintf("Joy: X=%d, Y=%d\r\n", 
-                               reading.data.joystickValues[0], 
-                               reading.data.joystickValues[1]);
-                    */
                     break;
                     
                 case 2: // Accelerometer
@@ -217,19 +194,12 @@ void GatekeeperTask(void *pvParameters)
                     accelYSum += reading.data.accelValues[1];
                     accelZSum += reading.data.accelValues[2];
                     accelCount++;
-                    
-                    // COMMENTED OUT: Print individual accelerometer reading (causes timing issues)
-                    /*
-                    UARTprintf("Accel: X=%d, Y=%d, Z=%d\r\n", 
-                               reading.data.accelValues[0],
-                               reading.data.accelValues[1],
-                               reading.data.accelValues[2]);
-                    */
                     break;
             }
         }
         
         // Print averages
+
         UARTprintf("\r\n========== Average Sensor Data ==========\r\n");
         
         if (micCount > 0)
@@ -269,16 +239,19 @@ void GatekeeperTask(void *pvParameters)
         
         UARTprintf("=================================\r\n");
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(GATEKEEPER_PERIOD_MS));
-        UARTprintf("\033[2J\033[H");
+
+
+
     }
+    //UARTprintf("\033[2J\033[H");
+
 
 
 }
 
-//*****************************************************************************
 // Hardware Initialization for Task 3
-//*****************************************************************************
 void Task3_HardwareInit(void)
+
 {
     // Enable peripherals
     SysCtlPeripheralEnable(SYSCTL_PERIPH_UART0);

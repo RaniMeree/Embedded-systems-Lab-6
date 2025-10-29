@@ -65,11 +65,11 @@ static void putByteIntoBuffer(void)
 {
     // Increment the buffer slot
     buffer[writeIndex] = buffer[writeIndex] + 1;
-    
-    if (uartMutex) xSemaphoreTake(uartMutex, portMAX_DELAY);
+
+    //if (uartMutex) xSemaphoreTake(uartMutex, portMAX_DELAY);
     UARTprintf("  [PRODUCER] Added 1 to buffer[%d] (now = %d)\r\n", 
                writeIndex, buffer[writeIndex]);
-    if (uartMutex) xSemaphoreGive(uartMutex);
+    //if (uartMutex) xSemaphoreGive(uartMutex);
     
     writeIndex = (writeIndex + 1) % BUFFER_SIZE;
     
@@ -82,45 +82,43 @@ static void removeByteFromBuffer(void)
 {
     // Decrement the buffer slot
     buffer[readIndex] = buffer[readIndex] - 1;
-    
-    if (uartMutex) xSemaphoreTake(uartMutex, portMAX_DELAY);
-    UARTprintf("  [CONSUMER] Subtracted 1 from buffer[%d] (now = %d)\r\n", 
-               readIndex, buffer[readIndex]);
-    if (uartMutex) xSemaphoreGive(uartMutex);
-    
+
+    //if (uartMutex) xSemaphoreTake(uartMutex, portMAX_DELAY);
+        UARTprintf("  [CONSUMER] Subsrtracted 1 to buffer[%d] (now = %d)\r\n",
+                   writeIndex, buffer[writeIndex]);
+      //  if (uartMutex) xSemaphoreGive(uartMutex);
+
     readIndex = (readIndex + 1) % BUFFER_SIZE;
     
     // Show buffer state
     printBufferState();
 }
 
-//*****************************************************************************
-// Producer Task - Now with proper synchronization!
-//*****************************************************************************
+
 static void ProducerTask_Semaphore(void *pvParameters)
 {
     while(1)
     {
-        // SOLUTION 1: Wait for an empty slot (counting semaphore)
+        // Wait for an empty slot (counting semaphore)
         // This prevents buffer overflow - blocks if buffer is full
         xSemaphoreTake(emptySlots, portMAX_DELAY);
         
-        // SOLUTION 2: Take mutex for exclusive access (binary semaphore)
-        // This prevents race conditions on buffer modifications
-        xSemaphoreTake(mutex, portMAX_DELAY);
         
+        xSemaphoreTake(mutex, portMAX_DELAY);
+
+
         // Add byte to buffer - now protected!
         putByteIntoBuffer();
         
-        // SOLUTION 3: Release mutex
-        xSemaphoreGive(mutex);
         
-        // SOLUTION 4: Signal one more full slot (counting semaphore)
+        xSemaphoreGive(mutex);
+
+        // Signal one more full slot (counting semaphore)
         // This wakes up consumer if waiting
         xSemaphoreGive(fullSlots);
         
         // Small delay to simulate production time
-        vTaskDelay(pdMS_TO_TICKS(50));
+//        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
@@ -144,7 +142,7 @@ static void ConsumerTask_Semaphore(void *pvParameters)
         xSemaphoreGive(emptySlots);
         
         // Small delay to simulate consumption time
-        vTaskDelay(pdMS_TO_TICKS(80));
+//        vTaskDelay(pdMS_TO_TICKS(80));
     }
 }
 

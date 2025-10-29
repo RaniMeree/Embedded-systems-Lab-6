@@ -19,10 +19,23 @@
 static int8_t buffer[BUFFER_SIZE];  // Use signed to show negative values as bugs!
 static int writeIndex = 0;
 static int readIndex = 0;
+static int byteCount = 0;  // Track how many items in buffer
 
-// Task handles for sleep/wakeup simulation
+// Task handles - NEEDED for sleep/wakeup!
 static TaskHandle_t producerHandle = NULL;
 static TaskHandle_t consumerHandle = NULL;
+
+
+
+static void sleep(void)
+{
+    vTaskSuspend(NULL);  // Suspend yourself (NULL = current task)
+}
+
+static void wakeup(TaskHandle_t taskHandle)
+{
+    vTaskResume(taskHandle);  // Resume the specified task
+}
 
 
 // Print buffer state for visualization
@@ -36,7 +49,8 @@ static void printBufferState(void)
         if (i > 0) UARTprintf(" ");
         UARTprintf("%3d", buffer[i]);
     }
-    UARTprintf("]\n");
+    
+    UARTprintf("] byteCount=%d\n", byteCount);
     
     UARTprintf("          ");
     for (i = 0; i < BUFFER_SIZE; i++)
@@ -59,15 +73,12 @@ static void printBufferState(void)
 // Producer: Add byte to buffer 
 static void putByteIntoBuffer(void)
 {
-    // PROBLEM: Not atomic! Consumer might modify same slot
     buffer[writeIndex] = buffer[writeIndex] + 1;
     
     UARTprintf("  [PRODUCER] Added 1 to buffer[%d] (now = %d)\r\n",
                writeIndex, buffer[writeIndex]);
     writeIndex = (writeIndex + 1) % BUFFER_SIZE;
-
-
-
+    
     // Show buffer state
     printBufferState();
 }
@@ -75,10 +86,9 @@ static void putByteIntoBuffer(void)
 // Consumer: Remove byte from buffer 
 static void removeByteFromBuffer(void)
 {
-    // PROBLEM: Not atomic! Producer might modify same slot
     buffer[readIndex] = buffer[readIndex] - 1;
     
-    UARTprintf("  [CONSUMER]  Subtracted 1 from buffer[%d] (now = %d)\r\n",
+    UARTprintf("  [CONSUMER] Subtracted 1 from buffer[%d] (now = %d)\r\n",
                readIndex, buffer[readIndex]);
     readIndex = (readIndex + 1) % BUFFER_SIZE;
     
@@ -91,26 +101,62 @@ static void ProducerTask(void *pvParameters)
 {
     while(1)
     {
-        // PROBLEM: No mutual exclusion!
+        // PROBLEM 1: race condition!
+        // Consumer can change byteCount between checking and sleeping
+        if (byteCount == BUFFER_SIZE)
+        {
+            UARTprintf("  [PRODUCER] Buffer FULL! Going to sleep...\r\n\r\n");
+            sleep();
+            UARTprintf("  [PRODUCER] Woken up!\r\n");
+        }
+        
         putByteIntoBuffer();
         
+        // PROBLEM 2: byteCount is not ptotected
+        // Consumer might also access byteCount at same time
+        byteCount = byteCount + 1;
+        
+        // If buffer was empty and then has 1 byte the consumer wakeup
+        if (byteCount == 1)
+        {
+            UARTprintf("  [PRODUCER] Waking up consumer!\r\n\r\n");
+            wakeup(consumerHandle);
+        }
+        
         // Small delay to simulate production time
-        vTaskDelay(pdMS_TO_TICKS(1));
+//        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
-//*****************************************************************************
-// Consumer Task - Has race conditions!
-//*****************************************************************************
+
 static void ConsumerTask(void *pvParameters)
 {
     while(1)
     {
-        // PROBLEM: No mutual exclusion!
+        // PROBLEM 1: Race condition!
+        // Producer might change bytecount between checking and sleeping
+        if (byteCount == 0)
+        {
+            UARTprintf("  [CONSUMER] Buffer EMPTY! Going to sleep...\r\n\r\n");
+            sleep();
+            UARTprintf("  [CONSUMER] Woken up!\r\n");
+        }
+        
         removeByteFromBuffer();
         
+        // PROBLEM 2: byteCount is not protected! 
+        // Producer might also access byteCount at same time 
+        byteCount = byteCount - 1;
+        
+        // If buffer was full and then has a space the producer wakes up
+        if (byteCount == BUFFER_SIZE - 1)
+        {
+            UARTprintf("  [CONSUMER] Waking up producer!\r\n\r\n");
+            wakeup(producerHandle);
+        }
+        
         // Small delay to simulate consumption time
-        vTaskDelay(pdMS_TO_TICKS(1));
+//        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
@@ -142,12 +188,7 @@ void Task1a_Init(void)
     // Print header
     UARTprintf("\r\n");
     UARTprintf("========================================\r\n");
-    UARTprintf("Task 1a: Producer-Consumer WITHOUT Semaphores\r\n");
-    UARTprintf("========================================\r\n");
-    UARTprintf("WATCH FOR PROBLEMS:\r\n");
-    UARTprintf("- Buffer slots going NEGATIVE (< 0)\r\n");
-    UARTprintf("- Buffer slots exceeding 1 (> 1)\r\n");
-    UARTprintf("- These prove race conditions!\r\n");
+    UARTprintf("WARNING: THIS HAS RACE CONDITIONS!\r\n");
     UARTprintf("========================================\r\n\r\n");
     
     // Create producer task

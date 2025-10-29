@@ -22,8 +22,8 @@
 //#define RUN_TASK1A   
 //#define RUN_TASK1B
 //#define RUN_TASK2
-//#define RUN_TASK3
-#define RUN_TASK3C
+#define RUN_TASK3
+//#define RUN_TASK3C
 
 void HardwareInit(void)
 {

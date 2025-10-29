@@ -159,9 +159,6 @@ static void GatekeeperTask(void *pvParameters)
     {
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(GATEKEEPER_PERIOD_MS));
         
-        // Optional: Clear screen for fresh output each cycle
-        // UARTprintf("\033[2J\033[H");  // Uncomment to clear screen
-        
         // Print all readings from queue individually
         while(xQueueReceive(sensorQueue, &reading, 0) == pdPASS)
         {
@@ -187,7 +184,7 @@ static void GatekeeperTask(void *pvParameters)
                     int dbFrac = (int)((dB - dbWhole) * 10);
                     if (dbFrac < 0) dbFrac = -dbFrac;
                     
-                    UARTprintf("Mic: %d.%01ddb\r\n", dbWhole, dbFrac);
+                    //UARTprintf("Mic: %d.%01ddb\r\n", dbWhole, dbFrac);
 
 
 
@@ -213,22 +210,49 @@ static void GatekeeperTask(void *pvParameters)
                 }
                 break;
                 
-                case 1: // Joystick
-                    UARTprintf("Joy: X=%d, Y=%d\r\n", 
-                               reading.data.joystickValues[0], 
-                               reading.data.joystickValues[1]);
-                    break;
-                    
-                case 2: // Accelerometer
-                    UARTprintf("Accel: X=%d, Y=%d, Z=%d\r\n", 
-                               reading.data.accelValues[0],
-                               reading.data.accelValues[1],
-                               reading.data.accelValues[2]);
-                    break;
-            }
+                            }
         }
         
-        UARTprintf("\r\n");  // Blank line after each cycle
+        UARTprintf("\r\n========== Average Sensor Data ==========\r\n");
+
+                if (micCount > 0)
+                {
+                    float peakToPeak = micMax - micMin;  // Amplitude of sound
+
+                    // Convert amplitude to decibels
+                    // Reference: use a small value to avoid log(0), typical mic reference
+                    float refVoltage = 0.001;  // 1 mV reference
+                    float dB;
+
+                    if (peakToPeak > 0.0001) {  // Avoid log of very small numbers
+                        dB = 20.0 * log10f(peakToPeak / refVoltage);
+                    } else {
+                        dB = 0.0;  // Silence
+                    }
+
+                    int dbWhole = (int)dB;
+                    int dbFrac = (int)((dB - dbWhole) * 10);
+                    if (dbFrac < 0) dbFrac = -dbFrac;  // Handle negative fractions
+
+                    UARTprintf("Mic: %d.%01d dB | samples: %d\r\n", dbWhole, dbFrac, micCount);
+                }
+
+                if (joyCount > 0)
+                {
+                    UARTprintf("Joy: X=%d, Y=%d (%d)\r\n",
+                               joyXSum/joyCount, joyYSum/joyCount, joyCount);
+                }
+
+                if (accelCount > 0)
+                {
+                    UARTprintf("Accel: X=%d, Y=%d, Z=%d (%d)\r\n",
+                               accelXSum/accelCount, accelYSum/accelCount,
+                               accelZSum/accelCount, accelCount);
+                }
+
+                UARTprintf("=================================\r\n");
+                vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(GATEKEEPER_PERIOD_MS));
+
     }
 }
 
