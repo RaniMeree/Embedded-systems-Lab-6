@@ -59,8 +59,8 @@ void ReadJoystick(uint16_t *x, uint16_t *y)
     ADCIntClear(ADC0_BASE, 0);
     ADCSequenceDataGet(ADC0_BASE, 0, adcValues);
     
-    *x = adcValues[0];
-    *y = adcValues[1];
+    *y = adcValues[0];
+    *x = adcValues[1];
 }
 
 void ReadMicrophone(float *value)
@@ -80,15 +80,14 @@ void ReadMicrophone(float *value)
 void ReadAccelerometer(uint16_t *x, uint16_t *y, uint16_t *z)
 {
     uint32_t adcValues[3];
-    
-    ADCProcessorTrigger(ADC0_BASE, 2);
+        ADCProcessorTrigger(ADC0_BASE, 2);
     while(!ADCIntStatus(ADC0_BASE, 2, false));
     ADCIntClear(ADC0_BASE, 2);
     ADCSequenceDataGet(ADC0_BASE, 2, adcValues);
     
-    *x = adcValues[0];
+    *z = adcValues[0];
     *y = adcValues[1];
-    *z = adcValues[2];
+    *x = adcValues[2];
 }
 
 
@@ -276,9 +275,12 @@ void Task3_HardwareInit(void)
     UARTStdioConfig(0, 115200, 120000000);
     
     // Configure ADC pins
-    GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_3 | GPIO_PIN_2 | GPIO_PIN_4 | GPIO_PIN_5);
-    GPIOPinTypeADC(GPIO_PORTD_BASE, GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2);
+    //GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_3 | GPIO_PIN_2 | GPIO_PIN_4 | GPIO_PIN_5);
+    //GPIOPinTypeADC(GPIO_PORTD_BASE, GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2);
     
+    //Patrik
+    GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_0  | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5);
+
     // Sequencer 0: Joystick (2 channels)
     ADCSequenceDisable(ADC0_BASE, 0);
     ADCSequenceConfigure(ADC0_BASE, 0, ADC_TRIGGER_PROCESSOR, 0);

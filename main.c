@@ -19,6 +19,7 @@
 
 
 
+
 //#define RUN_TASK1A   
 //#define RUN_TASK1B
 //#define RUN_TASK2
@@ -81,12 +82,12 @@ int main(void)
 
         Task3_Init();
 
-#elif defined(RUN_TASK3C)
+    #elif defined(RUN_TASK3C)
 
-    Task3c_Init();
+        Task3C_Init();
 
     #else
-        #error "No task selected! Please define RUN_TASK1A, RUN_TASK1B, RUN_TASK2, or RUN_TASK3"
+        #error "No task selected! Please define RUN_TASK1A, RUN_TASK1B, RUN_TASK2, RUN_TASK3, or RUN_TASK3C"
     #endif
     
 
